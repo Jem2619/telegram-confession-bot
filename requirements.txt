@@ -1,0 +1,4 @@
+aiogram==3.7.0
+python-dotenvpython-dotenv==1.0.1
+Pillow
+cachetools==5.3.3
