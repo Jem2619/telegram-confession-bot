@@ -1,76 +1,76 @@
 import os
 import asyncio
 import logging
-from bot import dp, bot, main # Импортируем dp, bot, и main из твоего основного файла
+import sys
+
+# Добавляем текущую директорию в путь, чтобы Python видел модули
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from bot import dp, bot, main
 from dotenv import load_dotenv
 
-# Загружаем переменные окружения
+# Настройка логирования для Render
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 
-# Основной URL твоего сервиса на Render, который будет предоставлен позже
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST") 
-# Секретный токен для проверки, что запрос пришел именно от Telegram
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") 
-# Путь, по которому Telegram будет отправлять обновления (может быть любым)
+# Получаем переменные окружения
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+# Если переменные не заданы, логируем предупреждение (но не падаем сразу, чтобы видеть логи)
+if not WEBHOOK_HOST or not WEBHOOK_SECRET:
+    logger.error("ОШИБКА: Не заданы WEBHOOK_HOST или WEBHOOK_SECRET в Environment Variables!")
+
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}"
-# Полный URL для установки вебхука
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" 
-# Локальный порт, на котором будет слушать сервер Render
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEB_SERVER_PORT = int(os.getenv("PORT", 8080))
 WEB_SERVER_HOST = "0.0.0.0"
 
-logger = logging.getLogger(__name__)
-
-async def on_startup(dispatcher, webhook_url):
-    # При запуске устанавливаем Webhook
-    logging.info(f"Установка Webhook по URL: {webhook_url}")
-    await dispatcher.bot.set_webhook(
-        url=webhook_url, 
+async def on_startup(bot_instance, webhook_url):
+    """Устанавливает вебхук при старте"""
+    logger.info(f"Установка Webhook по URL: {webhook_url}")
+    # ИСПРАВЛЕНИЕ: Вызываем метод у bot, а не у dispatcher.bot
+    await bot_instance.set_webhook(
+        url=webhook_url,
         secret_token=WEBHOOK_SECRET,
         drop_pending_updates=True
     )
 
-async def on_shutdown(dispatcher):
-    # При остановке удаляем Webhook
-    logging.info("Удаление Webhook")
-    await dispatcher.bot.delete_webhook()
+async def on_shutdown(bot_instance):
+    """Удаляет вебхук при остановке"""
+    logger.info("Удаление Webhook")
+    await bot_instance.delete_webhook()
 
 async def start_webhook():
-    # Инициализируем БД
-    # Твоя функция initialize_database() находится в bot.py в main(), 
-    # ее нужно вызывать, или просто вызвать main(), но тогда нужно 
-    # убрать dp.start_polling оттуда. Лучше вынеси инициализацию БД 
-    # и main() в отдельные функции или импортируй main.
-    
-    # Для простоты, вызовем основную функцию (если main содержит только setup)
-    # Если main содержит asyncio.run(main()), то вызываем его без run, или просто 
-    # вызываем dp.start_polling, как у тебя было.
-    
-    # ПРЕДПОЛОЖИМ, что инициализация БД произойдет при первом импорте bot.py
-    
-    # Вызываем функцию setup (если она есть) или просто настраиваем Webhook
-    await on_startup(dp, WEBHOOK_URL)
-    
-    # Запускаем Webhook
+    # 1. Инициализация БД (вызов функции main из bot.py)
+    # Важно: убедитесь, что в bot.py в функции main() НЕТ запуска dp.start_polling()
+    await main()
+
+    # 2. Установка вебхука
+    # Передаем объект 'bot' напрямую
+    await on_startup(bot, WEBHOOK_URL)
+
     try:
-        logging.info("Запуск Webhook-сервера...")
+        logger.info(f"Запуск Webhook-сервера на порту {WEB_SERVER_PORT}...")
+        
+        # 3. Запуск сервера
+        # Метод start_webhook сам запускает бесконечный цикл aiohttp
         await dp.start_webhook(
+            bot=bot, # Передаем объект бота сюда
             listen=WEB_SERVER_HOST,
             port=WEB_SERVER_PORT,
-            url=WEBHOOK_PATH,
+            url_path=WEBHOOK_PATH,
             secret_token=WEBHOOK_SECRET
         )
     except Exception as e:
-        logger.error(f"Ошибка запуска Webhook-сервера: {e}")
+        logger.error(f"Критическая ошибка запуска Webhook-сервера: {e}")
     finally:
-        await on_shutdown(dp)
+        # 4. Очистка при выходе
+        await on_shutdown(bot)
 
 if __name__ == "__main__":
-    # Вызываем основную функцию твоего bot.py для инициализации 
-    # всего (например, БД), но без asyncio.run()!
-    # Твой main() содержит asyncio.run(dp.start_polling()), поэтому 
-    # мы будем использовать эту обертку для запуска.
     try:
         asyncio.run(start_webhook())
     except KeyboardInterrupt:
-        logging.info("Бот остановлен")
+        logger.info("Бот остановлен")
