@@ -1,0 +1,20 @@
+# Файл render.yaml
+# Это конфигурация для Render Blueprint
+services:
+  - type: web
+    name: telegram-confession-bot
+    env: python
+    # Здесь мы указываем версию Python, которую нужно использовать
+    python:
+      version: 3.11.8
+    # Используем команду сборки, которую вы уже настроили
+    buildCommand: "pip install -r requirements.txt"
+    # Используем команду запуска
+    startCommand: "python webhook_runner.py"
+    # Настройки для обеспечения работы 24/7
+    plan: free
+    # Порт 8080 должен быть здесь, если вы используете aiogram Webhook
+    envVars:
+      - key: PORT
+        value: 8080
+      # Ваши остальные переменные (токены и секреты) лучше оставить в дашборде
