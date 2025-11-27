@@ -1275,7 +1275,7 @@ async def send_to_moderation(post_id: int):
 
     # Отправляем метаданные отдельным сообщением
     meta_msg = await bot.send_message(
-        chat_id=1052106591,
+        chat_id=ADMIN_CHAT_ID,
         text=admin_caption,
         parse_mode=ParseMode.HTML
     )
@@ -1866,3 +1866,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
 
         logger.info("Бот остановлен вручную")
+
