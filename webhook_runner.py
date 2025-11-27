@@ -1,76 +1,77 @@
 import os
-import asyncio
 import logging
 import sys
+from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-# Добавляем текущую директорию в путь, чтобы Python видел модули
+# Добавляем путь к текущей директории
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from bot import dp, bot, main
 from dotenv import load_dotenv
 
-# Настройка логирования для Render
+# Настройка логов
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Получаем переменные окружения
+# Настройки Webhook
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-# Если переменные не заданы, логируем предупреждение (но не падаем сразу, чтобы видеть логи)
-if not WEBHOOK_HOST or not WEBHOOK_SECRET:
-    logger.error("ОШИБКА: Не заданы WEBHOOK_HOST или WEBHOOK_SECRET в Environment Variables!")
-
 WEBHOOK_PATH = f"/webhook/{WEBHOOK_SECRET}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-WEB_SERVER_PORT = int(os.getenv("PORT", 8080))
-WEB_SERVER_HOST = "0.0.0.0"
 
-async def on_startup(bot_instance, webhook_url):
-    """Устанавливает вебхук при старте"""
-    logger.info(f"Установка Webhook по URL: {webhook_url}")
-    # ИСПРАВЛЕНИЕ: Вызываем метод у bot, а не у dispatcher.bot
-    await bot_instance.set_webhook(
-        url=webhook_url,
+# Настройки сервера
+WEB_SERVER_HOST = "0.0.0.0"
+WEB_SERVER_PORT = int(os.getenv("PORT", 8080))
+
+async def on_startup(app):
+    """Действия при запуске приложения"""
+    logger.info("Инициализация базы данных и настроек...")
+    # Запускаем инициализацию из bot.py (создание таблиц и т.д.)
+    # Важно: убедись, что main() в bot.py НЕ запускает polling!
+    await main()
+
+    logger.info(f"Установка Webhook: {WEBHOOK_URL}")
+    await bot.set_webhook(
+        url=WEBHOOK_URL,
         secret_token=WEBHOOK_SECRET,
         drop_pending_updates=True
     )
 
-async def on_shutdown(bot_instance):
-    """Удаляет вебхук при остановке"""
+async def on_shutdown(app):
+    """Действия при остановке"""
     logger.info("Удаление Webhook")
-    await bot_instance.delete_webhook()
+    await bot.delete_webhook()
 
-async def start_webhook():
-    # 1. Инициализация БД (вызов функции main из bot.py)
-    # Важно: убедитесь, что в bot.py в функции main() НЕТ запуска dp.start_polling()
-    await main()
+def start_webhook_server():
+    # 1. Создаем веб-приложение
+    app = web.Application()
 
-    # 2. Установка вебхука
-    # Передаем объект 'bot' напрямую
-    await on_startup(bot, WEBHOOK_URL)
+    # 2. Настраиваем обработчик запросов от Telegram
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=WEBHOOK_SECRET,
+    )
+    
+    # 3. Регистрируем путь для вебхука
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
 
-    try:
-        logger.info(f"Запуск Webhook-сервера на порту {WEB_SERVER_PORT}...")
-        
-        # 3. Запуск сервера
-        # Метод start_webhook сам запускает бесконечный цикл aiohttp
-        await dp.start_webhook(
-            bot=bot, # Передаем объект бота сюда
-            listen=WEB_SERVER_HOST,
-            port=WEB_SERVER_PORT,
-            url_path=WEBHOOK_PATH,
-            secret_token=WEBHOOK_SECRET
-        )
-    except Exception as e:
-        logger.error(f"Критическая ошибка запуска Webhook-сервера: {e}")
-    finally:
-        # 4. Очистка при выходе
-        await on_shutdown(bot)
+    # 4. Настраиваем приложение (добавляем диспетчер и бота в контекст)
+    setup_application(app, dp, bot=bot)
+
+    # 5. Добавляем функции старта и остановки
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    # 6. Запускаем сервер
+    logger.info(f"Запуск сервера aiohttp на порту {WEB_SERVER_PORT}...")
+    web.run_app(app, host=WEB_SERVER_HOST, port=WEB_SERVER_PORT)
 
 if __name__ == "__main__":
     try:
-        asyncio.run(start_webhook())
+        start_webhook_server()
     except KeyboardInterrupt:
-        logger.info("Бот остановлен")
+        pass
